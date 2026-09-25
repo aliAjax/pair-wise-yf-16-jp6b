@@ -1,126 +1,144 @@
+import { useEffect, useState } from "react";
+import { Order } from "./types";
+import { loadOrders, saveOrders, seedOrders } from "./store";
+import OrderList from "./components/OrderList";
+import OrderForm from "./components/OrderForm";
+import Customers from "./components/Customers";
+import OrderView from "./components/OrderView";
 import "./styles.css";
 
-const project = {
-  "sourceNo": 6,
-  "id": "hxyfront-62004",
-  "port": 62004,
-  "title": "滑雪板调校维护",
-  "domain": "滑雪装备调校",
-  "prompt": "我想做一个面向滑雪板调校店的装备维护前端系统，技师可以记录雪板品牌、长度、板型、刃角、打蜡类型、底板损伤、修补位置和客户偏好。页面需要有维护工单列表、刃角参数表、底板损伤标记区、完工状态筛选和客户历史维护记录。",
-  "palette": [
-    "#0369a1",
-    "#14b8a6",
-    "#f97316"
-  ],
-  "metrics": [
-    "待维护",
-    "完工工单",
-    "平均刃角",
-    "底板修补"
-  ],
-  "filters": [
-    "全地域",
-    "公园板",
-    "竞速板",
-    "粉雪板"
-  ],
-  "fields": [
-    "雪板品牌",
-    "长度",
-    "板型",
-    "刃角",
-    "打蜡类型",
-    "底板损伤"
-  ],
-  "records": [
-    [
-      "ORD-106",
-      "Burton 156",
-      "侧刃88°，底刃1°",
-      "已打低温蜡"
-    ],
-    [
-      "ORD-112",
-      "竞速板165",
-      "底板划痕12cm",
-      "待补P-Tex"
-    ],
-    [
-      "ORD-118",
-      "粉雪板158",
-      "客户偏好弱咬雪",
-      "待交付"
-    ]
-  ]
-};
+type Route =
+  | { name: "list" }
+  | { name: "form"; orderId?: string }
+  | { name: "customers" }
+  | { name: "order"; id: string };
 
 function App() {
+  const [orders, setOrders] = useState<Order[]>(() => loadOrders());
+  const [route, setRoute] = useState<Route>({ name: "list" });
+
+  // 任何变更立即写入 localStorage，换班重开浏览器可继续处理
+  useEffect(() => {
+    saveOrders(orders);
+  }, [orders]);
+
+  const upsert = (order: Order) =>
+    setOrders((prev) => {
+      const i = prev.findIndex((o) => o.id === order.id);
+      if (i === -1) return [order, ...prev];
+      const next = [...prev];
+      next[i] = order;
+      return next;
+    });
+
+  const remove = (id: string) =>
+    setOrders((prev) => prev.filter((o) => o.id !== id));
+
+  const counts = {
+    pending: orders.filter((o) => o.status === "pending").length,
+    delivering: orders.filter((o) => o.status === "delivering").length,
+    done: orders.filter((o) => o.status === "done").length,
+  };
+
+  const editing =
+    route.name === "form" && route.orderId
+      ? orders.find((o) => o.id === route.orderId)
+      : undefined;
+  const viewing =
+    route.name === "order" ? orders.find((o) => o.id === route.id) : undefined;
+
   return (
     <main className="app">
-      <section className="hero">
-        <p>{project.id} · 源提示词{project.sourceNo} · Port {project.port}</p>
-        <h1>{project.title}</h1>
-        <span>{project.prompt}</span>
-      </section>
+      <header className="topbar">
+        <div>
+          <h1>滑雪板调校工单</h1>
+          <p className="muted">数据保存在本机浏览器 · 换班重开可继续处理</p>
+        </div>
+        <nav>
+          <button
+            className={route.name === "list" ? "chip active" : "chip"}
+            onClick={() => setRoute({ name: "list" })}
+          >
+            工单列表
+          </button>
+          <button
+            className={route.name === "form" ? "chip active" : "chip"}
+            onClick={() => setRoute({ name: "form" })}
+          >
+            新建工单
+          </button>
+          <button
+            className={route.name === "customers" ? "chip active" : "chip"}
+            onClick={() => setRoute({ name: "customers" })}
+          >
+            客户档案
+          </button>
+        </nav>
+      </header>
 
       <section className="metrics">
-        {project.metrics.map((metric: string, index: number) => (
-          <article key={metric}>
-            <small>{metric}</small>
-            <strong>{[86, 14, 7, 32][index] ?? 12}</strong>
-          </article>
+        <article>
+          <small>待维护</small>
+          <strong>{counts.pending}</strong>
+        </article>
+        <article>
+          <small>待交付</small>
+          <strong>{counts.delivering}</strong>
+        </article>
+        <article>
+          <small>已完成</small>
+          <strong>{counts.done}</strong>
+        </article>
+        <article>
+          <small>底板修补总次数</small>
+          <strong>
+            {orders.reduce(
+              (n, o) => n + o.damages.reduce((m, d) => m + d.repairs.length, 0),
+              0
+            )}
+          </strong>
+        </article>
+      </section>
+
+      {route.name === "list" && (
+        <OrderList
+          orders={orders}
+          onUpdate={upsert}
+          onDelete={remove}
+          onEdit={(id) => setRoute({ name: "form", orderId: id })}
+          onView={(id) => setRoute({ name: "order", id })}
+          onSeed={() => setOrders(seedOrders())}
+        />
+      )}
+
+      {route.name === "form" && (
+        <OrderForm
+          key={editing?.id ?? "new"}
+          initial={editing}
+          onSave={(order) => {
+            upsert(order);
+            setRoute({ name: "list" });
+          }}
+          onCancel={() => setRoute({ name: "list" })}
+        />
+      )}
+
+      {route.name === "customers" && (
+        <Customers
+          orders={orders}
+          onOpenOrder={(id) => setRoute({ name: "order", id })}
+        />
+      )}
+
+      {route.name === "order" &&
+        (viewing ? (
+          <OrderView order={viewing} onBack={() => setRoute({ name: "list" })} />
+        ) : (
+          <section className="panel">
+            <p className="muted">工单不存在或已删除。</p>
+            <button onClick={() => setRoute({ name: "list" })}>返回列表</button>
+          </section>
         ))}
-      </section>
-
-      <section className="workspace">
-        <aside className="panel">
-          <h2>{project.domain}筛选</h2>
-          <div className="chips">
-            {project.filters.map((item: string) => (
-              <button key={item}>{item}</button>
-            ))}
-          </div>
-        </aside>
-
-        <section className="panel form-panel">
-          <div className="heading">
-            <div>
-              <p>专业字段</p>
-              <h2>新增记录</h2>
-            </div>
-            <button className="primary">保存草稿</button>
-          </div>
-          <div className="field-grid">
-            {project.fields.map((field: string) => (
-              <label key={field}>
-                <span>{field}</span>
-                <input placeholder={"填写" + field} />
-              </label>
-            ))}
-          </div>
-        </section>
-      </section>
-
-      <section className="panel">
-        <div className="heading">
-          <div>
-            <p>历史记录</p>
-            <h2>近期工作台</h2>
-          </div>
-          <button>导出摘要</button>
-        </div>
-        <div className="records">
-          {project.records.map((record: string[], index: number) => (
-            <article key={record.join("-")}>
-              <b>{String(index + 1).padStart(2, "0")}</b>
-              <div>
-                <h3>{record[0]}</h3>
-                <p>{record.slice(1).join(" · ")}</p>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
     </main>
   );
 }
